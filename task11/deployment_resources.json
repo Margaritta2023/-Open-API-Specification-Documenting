@@ -89,8 +89,12 @@
           "Sid": "PublicReadGetObject",
           "Effect": "Allow",
           "Principal": "*",
-          "Action": ["s3:GetObject"],
-          "Resource": ["arn:aws:s3:::api-ui-hoster/*"]
+          "Action": [
+            "s3:GetObject"
+          ],
+          "Resource": [
+            "arn:aws:s3:::api-ui-hoster/*"
+          ]
         }
       ]
     },
@@ -100,6 +104,7 @@
       "block_public_policy": false,
       "restrict_public_buckets": false
     },
+    "tags": {},
     "website_hosting": {
       "enabled": true,
       "index_document": "index.html",

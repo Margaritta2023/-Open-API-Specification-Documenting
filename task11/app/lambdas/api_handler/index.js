@@ -1,56 +1,79 @@
 const AWS = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
 
+
 const cognitoIdentityServiceProvider = new AWS.CognitoIdentityServiceProvider({
     region: process.env.region
 });
 
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
-const reservationsTable = process.env.RESERVATION;
-const tablesTable = process.env.TABLE;
+const reservationsTable = process.env.revtable
+const tablesTable = process.env.tablestable
+
+
+
+function apiResponse(statusCode, body) {
+    return {
+        statusCode: statusCode,
+        headers: {
+            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Accept-Version": "*"
+        },
+        body: JSON.stringify(body)
+    }
+}
 
 exports.handler = async (event) => {
-    const userPoolId = process.env.USERPOOL;
-    const clientId = process.env.USERPOOLCLIENT;
+    const userPoolId = process.env.CUPId;
+    const clientId = process.env.CUPClientId;
 
     // Parse the request body
-    let body = JSON.parse(event.body);
+    let body = JSON.parse(event.body)
+
+    console.log(body);
+    console.log(event);
+
 
     // Handle `/signup` endpoint
     if (event.resource === '/signup' && event.httpMethod === 'POST') {
-        const { email, password } = body;
+
+        const { email, password, firstName, lastName } = body;
+        if(!email || !password || !firstName || !lastName){
+            return apiResponse(400, {message:"Bad Request"})
+        }
+
         const params = {
             ClientId: clientId,
             Username: email,
             Password: password,
             UserAttributes: [{ Name: 'email', Value: email }],
+            // MessageAction: "SUPPRESS", 
         };
-
         try {
             await cognitoIdentityServiceProvider.signUp(params).promise();
             const confirmParams = {
-                Username: email,
+                Username: body.email,
                 UserPoolId: userPoolId
             };
             await cognitoIdentityServiceProvider.adminConfirmSignUp(confirmParams).promise();
 
-            return {
-                statusCode: 200,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: "User created successfully" })
-            };
+            return apiResponse(200, { message: "User created successfully" })
         } catch (error) {
-            return {
-                statusCode: 400,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: "Signup failed", details: error.message })
-            };
+            console.log(error);
+
+            return apiResponse(400, { error: "Signup failed", details: error.message })
+
         }
     }
 
     // Handle `/signin` endpoint
     if (event.resource === '/signin' && event.httpMethod === 'POST') {
         const { email, password } = body;
+        if(!email || !password){
+            return apiResponse(400, {message:"Bad Request"})
+        }
         const params = {
             AuthFlow: 'ADMIN_NO_SRP_AUTH',
             UserPoolId: userPoolId,
@@ -63,125 +86,108 @@ exports.handler = async (event) => {
 
         try {
             const data = await cognitoIdentityServiceProvider.adminInitiateAuth(params).promise();
-            return {
-                statusCode: 200,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    accessToken: data.AuthenticationResult.IdToken || 'blank'
-                })
-            };
+            console.log(data);
+            return apiResponse(200, { accessToken: data.AuthenticationResult.IdToken || 'blank' })
+
         } catch (error) {
-            return {
-                statusCode: 400,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: "Authentication failed", details: error })
-            };
+            console.log(error);
+            return apiResponse(400, { error: "Authentication failed", details: error })
         }
     }
 
-    // Handle `/tables` endpoint - GET method
     if (event.resource === '/tables' && event.httpMethod === 'GET') {
         const params = {
             TableName: tablesTable
         };
         try {
             const data = await dynamoDB.scan(params).promise();
-            return {
-                statusCode: 200,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ tables: data.Items }) // Returns all tables
-            };
+            return apiResponse(200, { tables: data.Items })
         } catch (error) {
-            return {
-                statusCode: 500,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: "Failed to fetch tables", details: error.message })
-            };
+            console.error(error);
+            return apiResponse(500, { error: "Failed to fetch tables", details: error.message })
         }
     }
 
-    // Handle `/tables` endpoint - POST method
+
     if (event.resource === '/tables' && event.httpMethod === 'POST') {
         try {
             const params = {
                 TableName: tablesTable,
                 Item: body
             };
-            await dynamoDB.put(params).promise();
-            return {
-                statusCode: 200,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ id: body.id })
-            };
+            await dynamoDB.put(params).promise()
+            return apiResponse(200, { id: body.id })
+
+
         } catch (e) {
-            return {
-                statusCode: 500,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: "Error" })
-            };
+            console.log(e);
+            return apiResponse(500, { message: "error" })
         }
+
     }
+
 
     // Handle `/tables/{tableId}` resource for GET method
     if (event.resource === '/tables/{tableId}' && event.httpMethod === 'GET') {
         const tableId = event.pathParameters.tableId;
         const params = {
             TableName: tablesTable,
-            Key: { id: parseInt(tableId) }
+            Key: { id: parseInt(tableId) } // Assuming `id` is the primary key in the tablesTable
         };
         try {
             const data = await dynamoDB.get(params).promise();
             if (data.Item) {
-                return {
-                    statusCode: 200,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...data.Item })
-                };
+                return apiResponse(200, { ...data.Item })
             } else {
-                return {
-                    statusCode: 404,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ error: "Table not found" })
-                };
+                return apiResponse(404, { error: "Table not found" })
             }
         } catch (error) {
-            return {
-                statusCode: 500,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: "Failed to fetch table data", details: error.message })
-            };
+            console.error(error);
+            return apiResponse(500, { error: "Failed to fetch table data", details: error.message })
         }
     }
 
-    // Handle `/reservations` endpoint - GET method
+
+
+
+
+
     if (event.resource === '/reservations' && event.httpMethod === 'GET') {
         try {
-            const params = { TableName: reservationsTable };
-            const data = await dynamoDB.scan(params).promise();
-            return {
-                statusCode: 200,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ reservations: data.Items }) // Replace with actual data
-            };
+            const params = { TableName: reservationsTable }
+            const data = await dynamoDB.scan(params).promise()
+            return apiResponse(200, { reservations: data.Items })
         } catch (e) {
-            return {
-                statusCode: 500,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ error: e.message })
-            };
+            console.log(e);
+            return apiResponse(500, e.message)
         }
     }
 
-    // Check if the table exists
+    async function checkIfTableExists(tableNumber) {
+        var params = {
+            ExpressionAttributeValues: {
+                ":tableNumber": parseInt(tableNumber)
+            },
+            FilterExpression: "number = :tableNumber",
+            KeyConditionExpression: "number = :tableNumber",
+            ProjectionExpression: "id, places",
+            TableName: tablesTable,
+        };
+
+        const data = await dynamoDB.scan(params).promise();
+        return data.Items.length > 0;
+    }
+
     async function isTableExist(tableNumber) {
-        const parsedTableNumber = parseInt(tableNumber);
+        const parsedTableNumber = parseInt(tableNumber)
+        //we check if table exists here
         try {
             const response = await dynamoDB
                 .scan({
                     TableName: tablesTable,
                     FilterExpression: "#number = :tableNumberValue",
                     ExpressionAttributeNames: {
-                        "#number": "number"
+                        "#number": "number", // Ensure "number" is the actual attribute name
                     },
                     ExpressionAttributeValues: {
                         ":tableNumberValue": parsedTableNumber
@@ -189,15 +195,17 @@ exports.handler = async (event) => {
                 })
                 .promise();
             return response.Items.length > 0;
+
         } catch (error) {
+            console.error("Error checking table existence:", error);
             return false;
         }
     }
 
-    // Check for overlapping reservation
+
     async function hasOverlappingReservation(reservationData) {
         try {
-            const tableNumber = reservationData.tableNumber;
+            const tableNumber = reservationData.tableNumber
             const response = await dynamoDB
                 .scan({
                     TableName: reservationsTable,
@@ -213,35 +221,36 @@ exports.handler = async (event) => {
                 const newStart = new Date(`${reservationData.date} ${reservationData.slotTimeStart}`).getTime();
                 const newEnd = new Date(`${reservationData.date} ${reservationData.slotTimeEnd}`).getTime();
 
+                // Check if the time slots overlap
                 if (newStart < existingEnd && newEnd > existingStart) {
                     return true; // Overlap detected
                 }
             }
+
             return false; // No overlap
         } catch (e) {
-            throw e;
+            console.error(e);
+
+            throw (e)
         }
+
     }
 
-    // Handle `/reservations` endpoint - POST method
+
+
     if (event.resource === '/reservations' && event.httpMethod === 'POST') {
         try {
-            const tableExistence = await isTableExist(body.tableNumber);
+            // identify if table exists
+            const tableExistence = await isTableExist(body.tableNumber)
             if (!tableExistence) {
-                return {
-                    statusCode: 400,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: "Table does not exist" })
-                };
+                console.log('table do not exist');
+                return apiResponse(400, { message: "table do not exist" })
             }
-
-            const isOverlapping = await hasOverlappingReservation(body);
-            if (isOverlapping) {
-                return {
-                    statusCode: 400,
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ message: "Reservation overlaps with an existing one" })
-                };
+            // identify if new reservation overlaping older
+            const isOverlaping = await hasOverlappingReservation(body)
+            if (isOverlaping) {
+                console.log('You are overlapping reservation. Cancel');
+                return apiResponse(400, { message: "You are overlapping reservation. Cancel" })
             }
 
             const id = uuidv4();
@@ -258,19 +267,13 @@ exports.handler = async (event) => {
                 }
             };
             await dynamoDB.put(params).promise();
-            return {
-                statusCode: 200,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ reservationId: id })
-            };
+            return apiResponse(200, { reservationId: id })
         } catch (e) {
-            return {
-                statusCode: 500,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: e.message })
-            };
+            console.log(e);
+            return apiResponse(500, { message: e.message })
         }
     }
+
 
     return {
         statusCode: 404,
